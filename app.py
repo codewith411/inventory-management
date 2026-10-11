@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 
+from external_api import search_by_barcode, search_by_name
 app = Flask(__name__)
 
 
@@ -137,6 +138,90 @@ def delete_inventory_item(item_id):
     inventory.remove(item)
 
     return "", 204
+
+@app.route("/products/search", methods=["GET"])
+def search_products():
+    """Search OpenFoodFacts by barcode or product name."""
+
+    barcode = request.args.get("barcode")
+    name = request.args.get("name")
+
+    if barcode:
+        product = search_by_barcode(barcode)
+
+        if product is None:
+            return jsonify({"error": "Product not found"}), 404
+
+        return jsonify(product), 200
+
+    if name:
+        products = search_by_name(name)
+        return jsonify(products), 200
+
+    return jsonify({
+        "error": "Provide either barcode or name"
+    }), 400
+
+
+@app.route("/inventory/import", methods=["POST"])
+def import_product():
+    """Find a product on OpenFoodFacts and add it to inventory."""
+
+    data = request.get_json(silent=True)
+
+    if not data:
+        return jsonify({"error": "Request body is required"}), 400
+
+    barcode = data.get("barcode")
+    name = data.get("name")
+
+    if not barcode and not name:
+        return jsonify({
+            "error": "Provide either barcode or name"
+        }), 400
+
+    # Search OpenFoodFacts
+    if barcode:
+        product = search_by_barcode(barcode)
+
+        if product is None:
+            return jsonify({
+                "error": "Product not found"
+            }), 404
+
+    else:
+        products = search_by_name(name)
+
+        if not products:
+            return jsonify({
+                "error": "Product not found"
+            }), 404
+
+        # Use the first matching product
+        product = products[0]
+
+    # Create a local inventory item
+    new_id = max(
+        (item["id"] for item in inventory),
+        default=0
+    ) + 1
+
+    new_item = {
+        "id": new_id,
+        "product_name": product.get("product_name", ""),
+        "brands": product.get("brands", ""),
+        "barcode": product.get("barcode", ""),
+        "price": data.get("price", 0),
+        "stock": data.get("stock", 0),
+        "ingredients_text": product.get(
+            "ingredients_text",
+            ""
+        )
+    }
+
+    inventory.append(new_item)
+
+    return jsonify(new_item), 201
 
 
 if __name__ == "__main__":
